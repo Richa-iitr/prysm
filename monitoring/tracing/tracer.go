@@ -9,6 +9,13 @@ import (
 	"github.com/prysmaticlabs/prysm/v5/runtime/version"
 	"github.com/sirupsen/logrus"
 	"go.opencensus.io/trace"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	stdout "go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.17.0"
 )
 
 var log = logrus.WithField("prefix", "tracing")
@@ -49,5 +56,36 @@ func Setup(serviceName, processName, endpoint string, sampleFraction float64, en
 	}
 	trace.RegisterExporter(exporter)
 
+	return nil
+}
+
+// SetupOtel creates and initializes a new tracing configuration using OpenTelemetry..
+func SetupOtel(serviceName, processName, endpoint string, sampleFraction float64, enable bool) error {
+	if !enable {
+		// If tracing is disabled, return immediately
+		return nil
+	}
+
+	if serviceName == "" {
+		return errors.New("tracing service name cannot be empty")
+	}
+
+	exporter, err := stdout.New(stdout.WithPrettyPrint())
+	if err != nil {
+		return err
+	}
+
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(exporter),
+		sdktrace.WithResource(resource.NewWithAttributes(
+			semconv.SchemaURL,
+			semconv.ServiceNameKey.String(serviceName),
+			attribute.String("process_name", processName),
+		)),
+		sdktrace.WithSampler(sdktrace.TraceIDRatioBased(sampleFraction)),
+	)
+	otel.SetTracerProvider(tp)
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
+	log.Printf("Tracing enabled with endpoint: %s", endpoint)
 	return nil
 }
